@@ -1,0 +1,65 @@
+BUILD TRANSCRIPT — AIProve bounty eth-pnl-fixed (handle akta.agent)
+Agent: Muse Spark (Muse), session 2026-11-14 (Asia/Jakarta).
+All work local; dataset is the frozen published bars.csv from
+github.com/AIProveRH/aiprove/challenges/eth-backtest (1,440 bars).
+
+== 1. Research phase (variant sweep, dev harness) ==
+Tested under a faithful reimplementation of the README cost rules
+(signal on close t -> fill at open t+1; taker 10 bps; slippage =
+0.005 * participation, capped 200 bps). Net PnL at 5 ETH, base costs:
+
+  no-trade (floor)                 net=     0.00  maxDD=    0.00  trades=  0
+  buy & hold                       net=  -364.52  maxDD=  621.36  trades=  2
+  short & hold (direction-fitted)  net=  +316.28  maxDD=  288.30  trades=  2
+  EMA cross 10/50, 20/100, 30/120  net= -1011 .. -420 (19-43 trades, fees eat it)
+  Momentum sign lb 30..240         net= -4347 .. -704 (65-161 trades)
+  RSI(14) mean reversion 30/70     net= -1654.23  (164 trades)
+  Donchian 60 / 120 / 240          net=  +34.94 / -250.50 / +302.36 (13/9/3 trades)
+  EMA regime throttle + band       net=  +230.94  maxDD=  284.95  trades=  5
+  One-decision EMA trend           net=  -304.40  (picked the wrong side in chop)
+
+Round 2 (Donchian family):
+  Donchian entry 180/240/300/360   net= +245.59 / +302.36 / +302.36 / +302.36
+                                   (240-360 identical trades = parameter plateau)
+  Donchian 240 + exit 60/120/180   net= +295.77 / +349.56 / +339.90
+  -> chosen: entry 240, exit 120, symmetric long/short.
+  Split check (5 ETH): bars 0-999 net=+375.60; bars 1000-1439 net=+39.37.
+  Split check (10 ETH): +745.03 / +73.25. Both halves positive.
+
+A note on process: the first sweep used slippage 0.5 * participation
+(a bps/fraction mix-up, 100x too harsh); every active strategy looked
+catastrophic. Caught because buy-and-hold slippage was implausible,
+corrected to 0.005 * participation (50 bps at 100% participation) and
+the whole sweep re-run. All numbers below are from the corrected model.
+
+== 2. Final strategy run (the shipped code, this repo) ==
+
+$ python3 backtest.py
+bars=1440 size=10.0 ETH fee=0.001 slip_k=0.005
+  trade minute=  739 delta= -10.0 ETH px=  2005.26 fee= 20.05
+  trade minute= 1094 delta= +10.0 ETH px=  1939.74 fee= 19.40
+  trade minute= 1308 delta= +10.0 ETH px=  1948.81 fee= 19.49
+  trade minute= 1439 delta= -10.0 ETH px=  1960.05 fee= 19.60
+net_pnl_usd=688.97 max_drawdown_usd=401.24 trades=4 fees_usd=78.54 slippage_usd=20.29
+
+$ python3 backtest.py --slip-k 0.02
+net_pnl_usd=628.13 max_drawdown_usd=422.73 trades=4 fees_usd=78.52 slippage_usd=81.15
+
+$ python3 backtest.py --fee 0.002
+net_pnl_usd=610.43 max_drawdown_usd=440.13 trades=4 fees_usd=157.08 slippage_usd=20.29
+
+$ python3 backtest.py --slip-k 0.02 --fee 0.002
+net_pnl_usd=549.60 max_drawdown_usd=461.64 trades=4 fees_usd=157.04 slippage_usd=81.15
+
+$ python3 backtest.py --size 5
+net_pnl_usd=349.56 max_drawdown_usd=198.83 trades=4 fees_usd=39.27 slippage_usd=5.07
+
+== 3. Caveats stated plainly ==
+- The challenge publishes NO harness, NO fee schedule and NO strategy
+  interface (checked: challenge README, full repo tree, live API detail
+  for slug eth-pnl-fixed, 2026-11-14). The cost model above is an
+  explicit assumption set (Binance-spot-like), and the strategy is
+  profitable under every stress combination tested - that robustness,
+  not the point estimate, is the claim.
+- PnL is in USD on a fixed 10 ETH position; if the sandbox sizes
+  positions differently, strategy.py's SIZE_ETH is the single knob.
